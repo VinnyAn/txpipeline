@@ -93,19 +93,9 @@ services:
       "
       echo 'Criando tópicos...'
 
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
-        --topic transactions.raw \
-        --partitions 3 \
-        --replication-factor 1 \
-        --config retention.ms=604800000
-
-      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
-        --topic transactions.dlq \
-        --partitions 1 \
-        --replication-factor 1 \
-        --config retention.ms=2592000000
-
-      echo 'Tópicos criados:'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic transactions-raw --partitions 3 --replication-factor 1 --config retention.ms=604800000 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic transactions-dlq --partitions 1 --replication-factor 1 --config retention.ms=2592000000 &&
+      echo 'Tópicos criados:' &&
       kafka-topics --bootstrap-server kafka:29092 --list
       "
 
