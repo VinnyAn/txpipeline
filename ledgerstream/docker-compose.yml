@@ -1,0 +1,114 @@
+services:
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: ledgerstream-kafka
+    ports:
+      - "9092:9092"   # acesso externo (sua máquina → container)
+      - "9101:9101"   # JMX para métricas (Prometheus futuramente)
+    environment:
+      # --- Identidade do broker ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller        # KRaft: mesmo nó faz os dois papéis
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+
+      # --- Listeners ---
+      # INTERNAL: comunicação entre containers (consumer, producer rodando no compose)
+      # EXTERNAL: acesso da sua máquina (producer.py rodando fora do compose)
+      # CONTROLLER: eleição KRaft (interno, não exposto)
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # --- Tópicos e retenção ---
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"      # criamos os tópicos explicitamente
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168                # 7 dias
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+
+      # --- JMX ---
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+
+      # --- KRaft cluster ID (fixo para dev, gerado uma vez) ---
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    container_name: ledgerstream-schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092   # listener INTERNAL
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: ledgerstream-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ledgerstream
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: ledgerstream-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo 'Criando tópicos...'
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic transactions.raw \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic transactions.dlq \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      echo 'Tópicos criados:'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+
+volumes:
+  kafka-data:
+    driver: local
