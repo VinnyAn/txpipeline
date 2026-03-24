@@ -14,6 +14,12 @@ class Loadenv:
     POSTGRES_PORT : int
     POSTGRES_DB : str
 
+    API_URL : str
+
+    JWT_SECRET_KEY : str
+    JWT_ALGORITHM : str
+    JWT_EXPIRE_MINUTES : int
+
     @classmethod
     def from_env(cls) -> None:
         load_dotenv()
@@ -26,6 +32,12 @@ class Loadenv:
                 POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD'),
                 POSTGRES_HOST = os.getenv('POSTGRES_HOST'),
                 POSTGRES_PORT = int(os.getenv('POSTGRES_PORT')),
-                POSTGRES_DB = os.getenv('POSTGRES_DB')
+                POSTGRES_DB = os.getenv('POSTGRES_DB'),
+                API_URL = os.getenv('API_URL'),
+
+                JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY'),
+                JWT_ALGORITHM = os.getenv('JWT_ALGORITHM'),
+                JWT_EXPIRE_MINUTES = int(os.getenv('JWT_EXPIRE_MINUTES'))
+
         )
         

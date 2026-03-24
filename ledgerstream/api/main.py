@@ -1,10 +1,17 @@
 import logging
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from db.models import TransactionRaw
 from db.session import SessionLocal
 from api.schemas import TransactionIn, TransactionOut
+from api.auth import (
+    Token,
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -57,14 +64,32 @@ def health():
     """
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
  
- 
+@app.post("/auth/token", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    Recebe usuário e senha, retorna um JWT.
+    O consumer vai bater aqui primeiro para obter o token.
+    """
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Usuário ou senha inválidos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = create_access_token(data={"sub": user["username"]})
+    return {"access_token": token, "token_type": "bearer"}
+
 @app.post("/transactions", response_model=TransactionOut, status_code=201)
 def create_transaction(
     payload: TransactionIn,       # FastAPI valida automaticamente via Pydantic
-    db: Session = Depends(get_db) # FastAPI injeta a conexão com o banco
+    db: Session = Depends(get_db), # FastAPI injeta a conexão com o banco
+    current_user: dict = Depends(get_current_user), # FastAPI valida o token e injeta o usuário atual
 ):
     """
     Recebe uma transação, valida e persiste no PostgreSQL.
+    Requer Bearer token no header Authorization.
  
     - 201 Created  → transação salva com sucesso
     - 409 Conflict → transação já existe (mesmo transaction_id)
@@ -105,5 +130,12 @@ def create_transaction(
     db.commit()
     db.refresh(transaction)  # atualiza o objeto com os dados do banco (ex: ingested_at)
  
-    logger.info("Transação %s salva com status=%s", transaction.transaction_id, transaction.status)
+    logger.info(
+        "Transação %s salva | user_id=%s status=%s",
+        transaction.transaction_id,
+        current_user["username"],
+        transaction.status,
+    )
+
+    return transaction
  
